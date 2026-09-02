@@ -3,11 +3,10 @@ import sqlite3
 import io
 from datetime import date
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.section import WD_ORIENT
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -57,7 +56,7 @@ def deletar_cc(id_registro):
     conexao.close()
 
 # =====================================================================
-# CONFIGURAÇÃO GERAL
+# CONFIGURAÇÃO GERAL E CSS
 # =====================================================================
 st.set_page_config(page_title="Sistema de Amostragem", layout="wide")
 st.markdown("""
@@ -68,6 +67,27 @@ st.markdown("""
     h1, h2, h3 { color: var(--azul-neon); }
     </style>
 """, unsafe_allow_html=True)
+
+# =====================================================================
+# FUNÇÕES DE GERAÇÃO COM CABEÇALHO DE REPETIÇÃO
+# =====================================================================
+def cabecalho_pdf(canvas, doc, titulo, empreendimento, os_num, matriz):
+    canvas.saveState()
+    canvas.setFont("Helvetica-Bold", 14)
+    canvas.drawCentredString(doc.pagesize[0] / 2.0, doc.pagesize[1] - 40, titulo)
+    canvas.setFont("Helvetica", 9)
+    canvas.drawString(40, doc.pagesize[1] - 65, f"Empreendimento: {empreendimento}")
+    canvas.drawString(40, doc.pagesize[1] - 80, f"OS N°: {os_num} | Matriz: {matriz}")
+    canvas.line(40, doc.pagesize[1] - 90, doc.pagesize[0] - 40, doc.pagesize[1] - 90)
+    canvas.restoreState()
+
+def cabecalho_word(doc, titulo, empreendimento, os_num, matriz):
+    header = doc.sections[0].header
+    p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+    p.text = f"{titulo}\nEmpreendimento: {empreendimento} | OS N°: {os_num} | Matriz: {matriz}"
+    p.style.font.size = Pt(9)
+    p.style.font.bold = True
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 # =====================================================================
 # NAVEGAÇÃO LATERAL
@@ -84,7 +104,6 @@ st.sidebar.markdown("---")
 # =====================================================================
 if aba_selecionada == "Ordem de Serviço":
     st.title("Gestão de Ordens de Serviço")
-    st.write("Anexe propostas comerciais em formato PDF.")
     
     arquivo_upload = st.file_uploader("Carregar Proposta/OS (Somente PDF)", type=["pdf"])
     
@@ -141,7 +160,7 @@ elif aba_selecionada == "Plano de Amostragem":
         if not num_documento or not nome_empreendimento:
             st.error("Preencha ao menos a Numeração e o Empreendimento.")
         else:
-            # Word
+            # DOCX
             doc = Document()
             titulo = doc.add_heading('PLANO DE AMOSTRAGEM', 0)
             titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -188,138 +207,145 @@ elif aba_selecionada == "Cadeia de Custódia":
         responsavel = c2.text_input("Responsável")
         os_num = c3.text_input("OS N° / PC N°")
         contato = c3.text_input("Contato")
-        ref = st.text_input("Ponto de Referência")
 
         st.subheader("Identificação da Amostragem")
-        c_m1, c_m2 = st.columns(2)
+        c_m1, c_m2, c_m3 = st.columns(3)
         opcoes_matriz = {
             "Água e Efluentes": ["ACH", "ASP", "ASB", "EFL"],
-            "Emissões Atmosféricas (EAT)": ["Isocinética", "Gases de Combustão", "Fumaça"],
-            "Ruído e Vibração": ["Acústica (ACT)", "Dosimetria (DOS)"],
-            "Qualidade do Ar": ["ATM (Gases)", "QAI (Bactérias/Fungos)"],
-            "Resíduos Sólidos (RS)": ["Sólido", "Líquido"],
-            "Solo": ["Solo Padrão"],
-            "Sedimentos": ["Sedimento Padrão"]
+            "Resíduos e Sedimentos": ["Resíduo Sólido", "Resíduo Líquido", "Sedimento", "Solo"]
         }
         matriz = c_m1.selectbox("Matriz", list(opcoes_matriz.keys()))
         submatriz = c_m2.selectbox("Submatriz", opcoes_matriz[matriz])
-        
-        c_d1, c_d2 = st.columns(2)
-        data_coleta = c_d1.date_input("Data da Coleta", format="DD/MM/YYYY")
-        hora_coleta = c_d2.time_input("Hora da Coleta (Opcional)")
+        data_coleta = c_m3.date_input("Data da Coleta", format="DD/MM/YYYY")
         
         hoje = date.today()
         bloqueio_temporal = hoje < data_coleta
         
         if bloqueio_temporal:
-            st.error(f"⚠️ Acesso Bloqueado: A Data da Coleta ({data_coleta.strftime('%d/%m/%Y')}) é no futuro. O preenchimento in loco e a emissão documental estão suspensos.")
+            st.error(f"⚠️ Bloqueio Temporal: A Data informada ({data_coleta.strftime('%d/%m/%Y')}) é no futuro. O preenchimento in loco e a emissão documental estão suspensos.")
         else:
-            st.success("✅ Acesso Liberado: Data validada.")
+            st.success("✅ Acesso Liberado para registro in loco.")
             
         st.markdown("---")
         st.subheader("Parâmetros das medições in loco")
         qtd_pontos = st.number_input("Quantidade de Pontos (Máx: 100)", min_value=1, max_value=100, step=1, disabled=bloqueio_temporal)
         
         dados_pontos = []
-        for i in range(int(qtd_pontos)):
-            with st.expander(f"Ponto {i+1}", expanded=not bloqueio_temporal):
-                p1, p2, p3 = st.columns(3)
-                id_ponto = p1.text_input("ID do Ponto", key=f"id_{i}", disabled=bloqueio_temporal)
-                ph = p1.text_input("pH", key=f"ph_{i}", disabled=bloqueio_temporal)
-                temp = p1.text_input("Temp (°C)", key=f"t_{i}", disabled=bloqueio_temporal)
-                cond = p2.text_input("Condutividade", key=f"c_{i}", disabled=bloqueio_temporal)
-                od = p2.text_input("Oxigênio Dissolvido", key=f"o_{i}", disabled=bloqueio_temporal)
-                std = p2.text_input("STD", key=f"st_{i}", disabled=bloqueio_temporal)
-                sal = p3.text_input("Salinidade", key=f"sa_{i}", disabled=bloqueio_temporal)
-                res = p3.text_input("Resistividade", key=f"re_{i}", disabled=bloqueio_temporal)
-                orp = p3.text_input("ORP", key=f"or_{i}", disabled=bloqueio_temporal)
-                dados_pontos.append([id_ponto, ph, temp, cond, od, std, sal, res, orp])
+        if matriz == "Água e Efluentes":
+            cabecalho_tabela = ["Ponto", "pH", "Temp (°C)", "Condutividade", "OD", "STD", "Salinidade", "Resistividade", "ORP"]
+            for i in range(int(qtd_pontos)):
+                with st.expander(f"Ponto {i+1}", expanded=not bloqueio_temporal):
+                    p1, p2, p3 = st.columns(3)
+                    id_ponto = p1.text_input("ID do Ponto", key=f"id_{i}", disabled=bloqueio_temporal)
+                    ph = p1.text_input("pH", key=f"ph_{i}", disabled=bloqueio_temporal)
+                    temp = p1.text_input("Temp (°C)", key=f"t_{i}", disabled=bloqueio_temporal)
+                    cond = p2.text_input("Condutividade", key=f"c_{i}", disabled=bloqueio_temporal)
+                    od = p2.text_input("Oxigênio Dissolvido", key=f"o_{i}", disabled=bloqueio_temporal)
+                    std = p2.text_input("STD", key=f"st_{i}", disabled=bloqueio_temporal)
+                    sal = p3.text_input("Salinidade", key=f"sa_{i}", disabled=bloqueio_temporal)
+                    res = p3.text_input("Resistividade", key=f"re_{i}", disabled=bloqueio_temporal)
+                    orp = p3.text_input("ORP", key=f"or_{i}", disabled=bloqueio_temporal)
+                    dados_pontos.append([id_ponto, ph, temp, cond, od, std, sal, res, orp])
+        else:
+            cabecalho_tabela = ["Ponto", "Descrição", "Tipo", "Massa (Kg)", "Localização"]
+            for i in range(int(qtd_pontos)):
+                with st.expander(f"Ponto {i+1}", expanded=not bloqueio_temporal):
+                    p1, p2 = st.columns(2)
+                    id_ponto = p1.text_input("ID do Ponto", key=f"id_{i}", disabled=bloqueio_temporal)
+                    desc = p1.text_input("Descrição", key=f"d_{i}", disabled=bloqueio_temporal)
+                    tipo = p1.text_input("Tipo", key=f"t_{i}", disabled=bloqueio_temporal)
+                    massa = p2.text_input("Massa (Kg)", key=f"m_{i}", disabled=bloqueio_temporal)
+                    loc = p2.text_input("Localização", key=f"l_{i}", disabled=bloqueio_temporal)
+                    dados_pontos.append([id_ponto, desc, tipo, massa, loc])
 
         st.markdown("---")
         st.subheader("Recepção e Inspeção da Amostra")
         r1, r2, r3 = st.columns(3)
         entregue = r1.text_input("Entregue por", disabled=bloqueio_temporal)
         recebido = r1.text_input("Recebido por", disabled=bloqueio_temporal)
-        data_rec = r2.date_input("Data Recepção", format="DD/MM/YYYY", disabled=bloqueio_temporal)
-        hora_rec = r2.time_input("Hora Recepção", disabled=bloqueio_temporal)
+        data_rec = r2.date_input("Data Recepção (Opcional)", format="DD/MM/YYYY", value=None, disabled=bloqueio_temporal)
+        hora_rec = r2.time_input("Hora Recepção (Opcional)", value=None, disabled=bloqueio_temporal)
         temp_rec = r3.text_input("Temperatura Recepção", disabled=bloqueio_temporal)
         desvio = r3.text_input("Desvio? (Sim/Não)", disabled=bloqueio_temporal)
         
         if not bloqueio_temporal:
             if st.button("Gerar Cadeia de Custódia", type="primary"):
-                orientacao = landscape(A4) if matriz == "Emissões Atmosféricas (EAT)" else A4
-                
-                # DOCX
+                # DOCX COM CABEÇALHO REPETIDO
                 doc = Document()
-                if orientacao == landscape(A4):
-                    secao = doc.sections[-1]
-                    secao.orientation = WD_ORIENT.LANDSCAPE
-                    secao.page_width, secao.page_height = secao.page_height, secao.page_width
-                    
-                tit = doc.add_heading('CADEIA DE CUSTÓDIA', 0)
-                tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                doc.add_heading('Identificação do Empreendimento', 1)
-                t_emp = doc.add_table(rows=3, cols=2)
+                cabecalho_word(doc, "CADEIA DE CUSTÓDIA", empreendimento, os_num, matriz)
+                doc.add_heading('Identificação do Empreendimento', level=1)
+                t_emp = doc.add_table(rows=2, cols=2)
                 t_emp.style = 'Table Grid'
                 t_emp.cell(0,0).text = f"Empreendimento: {empreendimento}"
                 t_emp.cell(0,1).text = f"Cód/OS: {cod_cliente} / {os_num}"
                 t_emp.cell(1,0).text = f"Endereço: {endereco}"
                 t_emp.cell(1,1).text = f"Responsável: {responsavel}"
-                t_emp.cell(2,0).text = f"Referência: {ref}"
-                t_emp.cell(2,1).text = f"Contato: {contato}"
                 
-                doc.add_heading('Identificação da Amostragem', 1)
+                doc.add_heading('Identificação da Amostragem', level=1)
                 t_amo = doc.add_table(rows=1, cols=3)
                 t_amo.style = 'Table Grid'
                 t_amo.cell(0,0).text = f"Matriz: {matriz}"
                 t_amo.cell(0,1).text = f"Submatriz: {submatriz}"
-                t_amo.cell(0,2).text = f"Data: {data_coleta.strftime('%d/%m/%Y')} {hora_coleta.strftime('%H:%M')}"
+                t_amo.cell(0,2).text = f"Data: {data_coleta.strftime('%d/%m/%Y')}"
                 
-                doc.add_heading('Parâmetros das medições in loco', 1)
-                cabs = ["Ponto", "pH", "Temp", "Cond", "OD", "STD", "Sal", "Resist", "ORP"]
-                t_par = doc.add_table(rows=1, cols=len(cabs))
+                doc.add_heading('Parâmetros das medições in loco', level=1)
+                t_par = doc.add_table(rows=1, cols=len(cabecalho_tabela))
                 t_par.style = 'Table Grid'
-                for i, c in enumerate(cabs): t_par.cell(0,i).text = c
+                for i, c in enumerate(cabecalho_tabela): t_par.cell(0,i).text = c
                 
-                # Tabela gerada mesmo com campos em branco garantindo o grid para preenchimento posterior
                 for linha in dados_pontos:
                     rc = t_par.add_row().cells
-                    for i, val in enumerate(linha): rc[i].text = val
+                    for i, val in enumerate(linha): rc[i].text = str(val)
                 
-                doc.add_heading('Recepção e Inspeção', 1)
+                # Tratamento para Data/Hora Opcionais
+                str_data_rec = data_rec.strftime('%d/%m/%Y') if data_rec else "___/___/___"
+                str_hora_rec = hora_rec.strftime('%H:%M') if hora_rec else "___:___"
+
+                doc.add_heading('Recepção e Inspeção', level=1)
                 t_rec = doc.add_table(rows=2, cols=2)
                 t_rec.style = 'Table Grid'
                 t_rec.cell(0,0).text = f"Entregue por: {entregue}"
                 t_rec.cell(0,1).text = f"Recebido por: {recebido}"
-                t_rec.cell(1,0).text = f"Data: {data_rec.strftime('%d/%m/%Y')} {hora_rec.strftime('%H:%M')}"
+                t_rec.cell(1,0).text = f"Data/Hora: {str_data_rec} às {str_hora_rec}"
                 t_rec.cell(1,1).text = f"Temp: {temp_rec} | Desvio: {desvio}"
                 
                 buf_docx = io.BytesIO()
                 doc.save(buf_docx)
 
-                # PDF
+                # PDF COM PAGINAÇÃO DINÂMICA E REPETIÇÃO
                 buf_pdf = io.BytesIO()
-                pdf = SimpleDocTemplate(buf_pdf, pagesize=orientacao)
+                pdf = BaseDocTemplate(buf_pdf, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=100, bottomMargin=30)
+                
+                def canvas_maker(canvas, doc):
+                    cabecalho_pdf(canvas, doc, "CADEIA DE CUSTÓDIA", empreendimento, os_num, matriz)
+
+                template = PageTemplate(id='todas_paginas', frames=Frame(30, 30, A4[0]-60, A4[1]-130), onPage=canvas_maker)
+                pdf.addPageTemplates([template])
+                
+                elem = []
                 estilos = getSampleStyleSheet()
-                est_titulo = ParagraphStyle('tit', parent=estilos['Heading1'], alignment=1)
-                
-                elem = [Paragraph("CADEIA DE CUSTÓDIA", est_titulo), Spacer(1, 10)]
-                est_tab = TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.black), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey)])
-                
-                elem.append(Paragraph("Identificação", estilos['Heading3']))
-                elem.append(Table([[f"Emp: {empreendimento}", f"OS: {os_num}"], [f"End: {endereco}", f"Resp: {responsavel}"]], style=est_tab))
+                est_tab = TableStyle([
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black), 
+                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                    ('FONTSIZE', (0,0), (-1,-1), 8)
+                ])
                 
                 elem.append(Paragraph("Amostragem", estilos['Heading3']))
-                elem.append(Table([[matriz, submatriz, f"Data: {data_coleta.strftime('%d/%m/%Y')}"]], style=est_tab))
+                elem.append(Table([[submatriz, f"Data: {data_coleta.strftime('%d/%m/%Y')}"]], style=est_tab))
                 
                 elem.append(Paragraph("Parâmetros in loco", estilos['Heading3']))
-                tabela_pontos = Table([cabs] + dados_pontos, repeatRows=1)
+                
+                # Cálculo de largura para adaptar às matrizes
+                largura_col = (A4[0] - 60) / len(cabecalho_tabela)
+                tabela_pontos = Table([cabecalho_tabela] + dados_pontos, colWidths=[largura_col]*len(cabecalho_tabela), repeatRows=1)
                 tabela_pontos.setStyle(est_tab)
                 elem.append(tabela_pontos)
                 
                 elem.append(Paragraph("Recepção", estilos['Heading3']))
-                elem.append(Table([[f"Entregue: {entregue}", f"Recebido: {recebido}"], [f"Data: {data_rec.strftime('%d/%m/%Y')}", f"Temp: {temp_rec}"]], style=est_tab))
+                elem.append(Table([
+                    [f"Entregue: {entregue}", f"Recebido: {recebido}"], 
+                    [f"Data/Hora: {str_data_rec} às {str_hora_rec}", f"Temp: {temp_rec}"]
+                ], style=est_tab))
                 
                 pdf.build(elem)
                 
