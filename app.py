@@ -2,13 +2,7 @@ import streamlit as st
 import sqlite3
 import io
 from datetime import date
-from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import BaseDocTemplate, SimpleDocTemplate, PageTemplate, Frame, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+from docxtpl import DocxTemplate
 
 # =====================================================================
 # INICIALIZAÇÃO DO BANCO DE DADOS
@@ -69,27 +63,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# FUNÇÕES DE GERAÇÃO COM CABEÇALHO DE REPETIÇÃO
-# =====================================================================
-def cabecalho_pdf(canvas, doc, titulo, empreendimento, os_num, matriz):
-    canvas.saveState()
-    canvas.setFont("Helvetica-Bold", 14)
-    canvas.drawCentredString(doc.pagesize[0] / 2.0, doc.pagesize[1] - 40, titulo)
-    canvas.setFont("Helvetica", 9)
-    canvas.drawString(40, doc.pagesize[1] - 65, f"Empreendimento: {empreendimento}")
-    canvas.drawString(40, doc.pagesize[1] - 80, f"OS N°: {os_num} | Matriz: {matriz}")
-    canvas.line(40, doc.pagesize[1] - 90, doc.pagesize[0] - 40, doc.pagesize[1] - 90)
-    canvas.restoreState()
-
-def cabecalho_word(doc, titulo, empreendimento, os_num, matriz):
-    header = doc.sections[0].header
-    p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
-    p.text = f"{titulo}\nEmpreendimento: {empreendimento} | OS N°: {os_num} | Matriz: {matriz}"
-    p.style.font.size = Pt(9)
-    p.style.font.bold = True
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-# =====================================================================
 # NAVEGAÇÃO LATERAL
 # =====================================================================
 st.sidebar.title("Navegação do Sistema")
@@ -144,6 +117,7 @@ if aba_selecionada == "Ordem de Serviço":
             with c3:
                 st.button("Excluir", key=f"del_os_{id_arq}", on_click=deletar_os, args=(id_arq,))
             st.markdown("---")
+
 # =====================================================================
 # MÓDULO 2: PLANO DE AMOSTRAGEM
 # =====================================================================
@@ -151,10 +125,58 @@ elif aba_selecionada == "Plano de Amostragem":
     st.title("Geração de Planos de Amostragem")
     
     with st.form("form_plano"):
-        num_documento = st.text_input("Numeração do Documento")
-        nome_empreendimento = st.text_input("Nome do Empreendimento")
-        endereco_empreendimento = st.text_input("Endereço do Empreendimento")
-        responsavel_empreendimento = st.text_input("Responsável")
+        st.subheader("1. Informações Básicas")
+        c1, c2 = st.columns(2)
+        num_documento = c1.text_input("Numeração do Documento")
+        nome_empreendimento = c1.text_input("Nome do Empreendimento")
+        endereco_empreendimento = c2.text_input("Local de Amostragem")
+        responsavel_empreendimento = c2.text_input("Contato / Responsável")
+        
+        st.subheader("2. Escopo e Especificações")
+        objetivo = st.text_area("Objetivo do Serviço")
+        especificacoes = st.text_area("Especificações do Cliente e Requisitos Legais")
+        duracao = st.text_input("Duração do Serviço")
+        
+        st.subheader("3. Matriz e Pontos de Amostragem")
+        st.write("Selecione as matrizes aplicáveis:")
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        m_humano = col_m1.checkbox("C. Humano")
+        m_super = col_m1.checkbox("Superficial")
+        m_sub = col_m2.checkbox("Subterrânea")
+        m_resid = col_m2.checkbox("Residual")
+        m_sed = col_m3.checkbox("Sedimentos")
+        m_solo = col_m3.checkbox("Solo")
+        m_residuo = col_m4.checkbox("Resíduo")
+        
+        c3, c4 = st.columns(2)
+        qtd_pontos_plano = c3.text_input("Quantidade de Pontos")
+        id_pontos = c4.text_input("Identificação dos Pontos")
+        acessibilidade = c3.text_input("Acessibilidade")
+        frequencia = c4.text_input("Frequência")
+        data_hora_plano = st.text_input("Data e Hora")
+        
+        st.subheader("4. Garantia da Validade (QA/QC)")
+        col_qa1, col_qa2, col_qa3 = st.columns(3)
+        qa_equip = col_qa1.checkbox("Branco de Equipamento")
+        qa_campo = col_qa2.checkbox("Branco de Campo")
+        qa_viagem = col_qa3.checkbox("Branco de Viagem")
+        qa_amostra = col_qa1.checkbox("Branco de Amostragem")
+        qa_temp = col_qa2.checkbox("Branco de Temperatura")
+        qa_duplicata = col_qa3.checkbox("Duplicata de Campo")
+        
+        st.subheader("5. Recepção no Laboratório")
+        temp_rec = st.radio("Temperatura de Recebimento", ["≤6°C", "Não se aplica", "Nenhum"], index=2)
+        
+        st.subheader("6. Equipe Técnica")
+        st.write("Preencha os colaboradores alocados para a coleta (Deixe em branco as linhas que não usar):")
+        equipe_dados = []
+        for i in range(3):
+            ce1, ce2, ce3 = st.columns(3)
+            nome_eq = ce1.text_input(f"Nome {i+1}", key=f"eq_n_{i}")
+            cargo_eq = ce2.text_input(f"Cargo {i+1}", key=f"eq_c_{i}")
+            etapa_eq = ce3.text_input(f"Etapa {i+1}", key=f"eq_e_{i}")
+            if nome_eq.strip() != "":
+                equipe_dados.append({"NOME": nome_eq, "CARGO": cargo_eq, "ETAPA": etapa_eq})
         
         submit_plano = st.form_submit_button("Gerar Plano de Amostragem", type="primary")
     
@@ -162,38 +184,48 @@ elif aba_selecionada == "Plano de Amostragem":
         if not num_documento.strip() or not nome_empreendimento.strip():
             st.error("Preencha ao menos a Numeração e o Empreendimento.")
         else:
-            # DOCX
-            doc = Document()
-            titulo = doc.add_heading('PLANO DE AMOSTRAGEM', 0)
-            titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            t = doc.add_table(rows=4, cols=2)
-            t.style = 'Table Grid'
-            t.cell(0,0).text, t.cell(0,1).text = "Documento N°:", num_documento
-            t.cell(1,0).text, t.cell(1,1).text = "Empreendimento:", nome_empreendimento
-            t.cell(2,0).text, t.cell(2,1).text = "Endereço:", endereco_empreendimento
-            t.cell(3,0).text, t.cell(3,1).text = "Responsável:", responsavel_empreendimento
-            buf_docx = io.BytesIO()
-            doc.save(buf_docx)
-            
-            # PDF
-            buf_pdf = io.BytesIO()
-            pdf = SimpleDocTemplate(buf_pdf, pagesize=A4)
-            estilos = getSampleStyleSheet()
-            elementos = [Paragraph("PLANO DE AMOSTRAGEM", ParagraphStyle(name='Title', parent=estilos['Heading1'], alignment=1)), Spacer(1, 15)]
-            dados_tabela = [
-                ["Documento N°:", num_documento], ["Empreendimento:", nome_empreendimento],
-                ["Endereço:", endereco_empreendimento], ["Responsável:", responsavel_empreendimento]
-            ]
-            tabela = Table(dados_tabela, colWidths=[150, 350])
-            tabela.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.black), ('BACKGROUND', (0,0), (0,-1), colors.lightgrey)]))
-            elementos.append(tabela)
-            pdf.build(elementos)
-            
-            st.success("Plano de Amostragem gerado com sucesso!")
-            
-            c1, c2 = st.columns(2)
-            c1.download_button("Baixar Plano (PDF)", data=buf_pdf.getvalue(), file_name=f"Plano_{num_documento}.pdf", mime="application/pdf")
-            c2.download_button("Baixar Plano (Word)", data=buf_docx.getvalue(), file_name=f"Plano_{num_documento}.docx")
+            try:
+                doc = DocxTemplate("template_plano.docx")
+                contexto_plano = {
+                    "NUM_DOC": num_documento,
+                    "EMPREENDIMENTO": nome_empreendimento,
+                    "ENDERECO": endereco_empreendimento,
+                    "RESPONSAVEL": responsavel_empreendimento,
+                    "OBJETIVO": objetivo,
+                    "ESPECIFICACOES": especificacoes,
+                    "DURACAO": duracao,
+                    "QTD_PONTOS": qtd_pontos_plano,
+                    "ID_PONTOS": id_pontos,
+                    "ACESSIBILIDADE": acessibilidade,
+                    "FREQUENCIA": frequencia,
+                    "DATA_HORA": data_hora_plano,
+                    "M_HUMANO": m_humano,
+                    "M_SUPER": m_super,
+                    "M_SUB": m_sub,
+                    "M_RESID": m_resid,
+                    "M_SED": m_sed,
+                    "M_SOLO": m_solo,
+                    "M_RESIDUO": m_residuo,
+                    "QA_EQUIP": qa_equip,
+                    "QA_CAMPO": qa_campo,
+                    "QA_VIAGEM": qa_viagem,
+                    "QA_AMOSTRA": qa_amostra,
+                    "QA_TEMP": qa_temp,
+                    "QA_DUPLICATA": qa_duplicata,
+                    "REC_6": temp_rec == "≤6°C",
+                    "REC_NA": temp_rec == "Não se aplica",
+                    "EQUIPE": equipe_dados
+                }
+                doc.render(contexto_plano)
+                
+                buf_docx = io.BytesIO()
+                doc.save(buf_docx)
+                
+                st.success("Plano de Amostragem gerado com sucesso!")
+                st.download_button("📝 Baixar Plano Preenchido (Word)", data=buf_docx.getvalue(), file_name=f"Plano_{num_documento}.docx")
+            except Exception as e:
+                st.error(f"Erro ao gerar documento. Certifique-se de que o arquivo 'template_plano.docx' foi enviado para o servidor. Detalhe: {e}")
+
 # =====================================================================
 # MÓDULO 3: CADEIA DE CUSTÓDIA
 # =====================================================================
@@ -235,7 +267,6 @@ elif aba_selecionada == "Cadeia de Custódia":
         
         dados_pontos = []
         if matriz == "Água e Efluentes":
-            cabecalho_tabela = ["Ponto", "pH", "Temp (°C)", "Condutividade", "OD", "STD", "Salinidade", "Resistividade", "ORP"]
             for i in range(int(qtd_pontos)):
                 with st.expander(f"Ponto {i+1}", expanded=not bloqueio_temporal):
                     p1, p2, p3 = st.columns(3)
@@ -248,9 +279,12 @@ elif aba_selecionada == "Cadeia de Custódia":
                     sal = p3.text_input("Salinidade", key=f"sa_{i}", disabled=bloqueio_temporal)
                     res = p3.text_input("Resistividade", key=f"re_{i}", disabled=bloqueio_temporal)
                     orp = p3.text_input("ORP", key=f"or_{i}", disabled=bloqueio_temporal)
-                    dados_pontos.append([id_ponto, ph, temp, cond, od, std, sal, res, orp])
+                    
+                    dados_pontos.append({
+                        "ID": id_ponto, "PH": ph, "TEMP": temp, "COND": cond, 
+                        "OD": od, "STD": std, "SAL": sal, "RES": res, "ORP": orp
+                    })
         else:
-            cabecalho_tabela = ["Ponto", "Descrição", "Tipo", "Massa (Kg)", "Localização"]
             for i in range(int(qtd_pontos)):
                 with st.expander(f"Ponto {i+1}", expanded=not bloqueio_temporal):
                     p1, p2 = st.columns(2)
@@ -259,7 +293,10 @@ elif aba_selecionada == "Cadeia de Custódia":
                     tipo = p1.text_input("Tipo", key=f"t_{i}", disabled=bloqueio_temporal)
                     massa = p2.text_input("Massa (Kg)", key=f"m_{i}", disabled=bloqueio_temporal)
                     loc = p2.text_input("Localização", key=f"l_{i}", disabled=bloqueio_temporal)
-                    dados_pontos.append([id_ponto, desc, tipo, massa, loc])
+                    
+                    dados_pontos.append({
+                        "ID": id_ponto, "DESC": desc, "TIPO": tipo, "MASSA": massa, "LOC": loc
+                    })
 
         st.markdown("---")
         st.subheader("Recepção e Inspeção da Amostra")
@@ -273,108 +310,63 @@ elif aba_selecionada == "Cadeia de Custódia":
         
         if not bloqueio_temporal:
             if st.button("Gerar Cadeia de Custódia", type="primary"):
-                # DOCX COM CABEÇALHO REPETIDO
-                doc = Document()
-                cabecalho_word(doc, "CADEIA DE CUSTÓDIA", empreendimento, os_num, matriz)
-                doc.add_heading('Identificação do Empreendimento', level=1)
-                t_emp = doc.add_table(rows=2, cols=2)
-                t_emp.style = 'Table Grid'
-                t_emp.cell(0,0).text = f"Empreendimento: {empreendimento}"
-                t_emp.cell(0,1).text = f"Cód/OS: {cod_cliente} / {os_num}"
-                t_emp.cell(1,0).text = f"Endereço: {endereco}"
-                t_emp.cell(1,1).text = f"Responsável: {responsavel}"
-                
-                doc.add_heading('Identificação da Amostragem', level=1)
-                t_amo = doc.add_table(rows=1, cols=3)
-                t_amo.style = 'Table Grid'
-                t_amo.cell(0,0).text = f"Matriz: {matriz}"
-                t_amo.cell(0,1).text = f"Submatriz: {submatriz}"
-                t_amo.cell(0,2).text = f"Data: {data_coleta.strftime('%d/%m/%Y')}"
-                
-                doc.add_heading('Parâmetros das medições in loco', level=1)
-                t_par = doc.add_table(rows=1, cols=len(cabecalho_tabela))
-                t_par.style = 'Table Grid'
-                for i, c in enumerate(cabecalho_tabela): t_par.cell(0,i).text = c
-                
-                for linha in dados_pontos:
-                    rc = t_par.add_row().cells
-                    for i, val in enumerate(linha): rc[i].text = str(val)
-                
-                # Tratamento para Data/Hora Opcionais
                 str_data_rec = data_rec.strftime('%d/%m/%Y') if data_rec else "___/___/___"
                 str_hora_rec = hora_rec.strftime('%H:%M') if hora_rec else "___:___"
 
-                doc.add_heading('Recepção e Inspeção', level=1)
-                t_rec = doc.add_table(rows=2, cols=2)
-                t_rec.style = 'Table Grid'
-                t_rec.cell(0,0).text = f"Entregue por: {entregue}"
-                t_rec.cell(0,1).text = f"Recebido por: {recebido}"
-                t_rec.cell(1,0).text = f"Data/Hora: {str_data_rec} às {str_hora_rec}"
-                t_rec.cell(1,1).text = f"Temp: {temp_rec} | Desvio: {desvio}"
-                
-                buf_docx = io.BytesIO()
-                doc.save(buf_docx)
+                contexto_cc = {
+                    "EMPREENDIMENTO": empreendimento,
+                    "ENDERECO": endereco,
+                    "COD_CLIENTE": cod_cliente,
+                    "RESPONSAVEL": responsavel,
+                    "OS_NUM": os_num,
+                    "CONTATO": contato,
+                    "MATRIZ": matriz,
+                    "SUBMATRIZ": submatriz,
+                    "DATA_COLETA": data_coleta.strftime('%d/%m/%Y'),
+                    "ENTREGUE": entregue,
+                    "RECEBIDO": recebido,
+                    "DATA_REC": str_data_rec,
+                    "HORA_REC": str_hora_rec,
+                    "TEMP_REC": temp_rec,
+                    "DESVIO": desvio,
+                    "PONTOS": dados_pontos
+                }
 
-                # PDF COM PAGINAÇÃO DINÂMICA E REPETIÇÃO
-                buf_pdf = io.BytesIO()
-                pdf = BaseDocTemplate(buf_pdf, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=100, bottomMargin=30)
-                
-                def canvas_maker(canvas, doc):
-                    cabecalho_pdf(canvas, doc, "CADEIA DE CUSTÓDIA", empreendimento, os_num, matriz)
-
-                template = PageTemplate(id='todas_paginas', frames=Frame(30, 30, A4[0]-60, A4[1]-130), onPage=canvas_maker)
-                pdf.addPageTemplates([template])
-                
-                elem = []
-                estilos = getSampleStyleSheet()
-                est_tab = TableStyle([
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.black), 
-                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                    ('FONTSIZE', (0,0), (-1,-1), 8)
-                ])
-                
-                elem.append(Paragraph("Amostragem", estilos['Heading3']))
-                elem.append(Table([[submatriz, f"Data: {data_coleta.strftime('%d/%m/%Y')}"]], style=est_tab))
-                
-                elem.append(Paragraph("Parâmetros in loco", estilos['Heading3']))
-                
-                # Cálculo de largura para adaptar às matrizes
-                largura_col = (A4[0] - 60) / len(cabecalho_tabela)
-                tabela_pontos = Table([cabecalho_tabela] + dados_pontos, colWidths=[largura_col]*len(cabecalho_tabela), repeatRows=1)
-                tabela_pontos.setStyle(est_tab)
-                elem.append(tabela_pontos)
-                
-                elem.append(Paragraph("Recepção", estilos['Heading3']))
-                elem.append(Table([
-                    [f"Entregue: {entregue}", f"Recebido: {recebido}"], 
-                    [f"Data/Hora: {str_data_rec} às {str_hora_rec}", f"Temp: {temp_rec}"]
-                ], style=est_tab))
-                
-                pdf.build(elem)
-                
-                # Salvar DB
-                conexao = sqlite3.connect('laboratorio.db')
-                c = conexao.cursor()
-                c.execute('INSERT INTO cadeias_custodia_geradas (os_num, empreendimento, matriz, data_geracao, conteudo_pdf, conteudo_docx) VALUES (?,?,?,?,?,?)',
-                          (os_num, empreendimento, matriz, date.today().strftime("%d/%m/%Y"), buf_pdf.getvalue(), buf_docx.getvalue()))
-                conexao.commit()
-                conexao.close()
-                st.success("Cadeia de Custódia gerada com sucesso! Acesse a aba 'Cadeias de Custódia Geradas'.")
+                try:
+                    arquivo_template = "template_cc_agua.docx" if matriz == "Água e Efluentes" else "template_cc_solidos.docx"
+                    doc = DocxTemplate(arquivo_template)
+                    doc.render(contexto_cc)
+                    
+                    buf_docx = io.BytesIO()
+                    doc.save(buf_docx)
+                    
+                    conexao = sqlite3.connect('laboratorio.db')
+                    c = conexao.cursor()
+                    c.execute('INSERT INTO cadeias_custodia_geradas (os_num, empreendimento, matriz, data_geracao, conteudo_pdf, conteudo_docx) VALUES (?,?,?,?,?,?)',
+                              (os_num, empreendimento, matriz, date.today().strftime("%d/%m/%Y"), None, buf_docx.getvalue()))
+                    conexao.commit()
+                    conexao.close()
+                    
+                    st.success("Cadeia de Custódia gerada a partir do Template com sucesso! Acesse a aba ao lado.")
+                except Exception as e:
+                    st.error(f"Erro ao processar template. Certifique-se de que os arquivos 'template_cc_agua.docx' e 'template_cc_solidos.docx' foram carregados no GitHub. Detalhe: {e}")
 
     with tab_hist:
         st.subheader("Cadeias de Custódia Salvas")
         conexao = sqlite3.connect('laboratorio.db')
         c = conexao.cursor()
-        c.execute("SELECT id, os_num, empreendimento, matriz, data_geracao, conteudo_pdf, conteudo_docx FROM cadeias_custodia_geradas")
+        c.execute("SELECT id, os_num, empreendimento, matriz, data_geracao, conteudo_docx FROM cadeias_custodia_geradas")
         salvos = c.fetchall()
         conexao.close()
         
         if salvos:
             for cc in salvos:
-                id_cc, os_db, emp_db, mat_db, data_db, pdf_b, doc_b = cc
-                c1, c2, c3 = st.columns([5, 2, 2])
+                id_cc, os_db, emp_db, mat_db, data_db, doc_b = cc
+                c1, c2, c3 = st.columns([6, 2, 2])
                 with c1: st.write(f"**OS {os_db}** | {emp_db} ({mat_db}) | {data_db}")
-                with c2: st.download_button("PDF", pdf_b, f"CC_{os_db}.pdf", key=f"pdf_{id_cc}")
-                with c3: st.download_button("Word", doc_b, f"CC_{os_db}.docx", key=f"doc_{id_cc}")
-                st.button("Excluir", key=f"del_cc_{id_cc}", on_click=deletar_cc, args=(id_cc,))
+                with c2: 
+                    if doc_b:
+                        st.download_button("📝 Baixar Word", doc_b, f"CC_{os_db}.docx", key=f"doc_{id_cc}")
+                with c3: 
+                    st.button("Excluir", key=f"del_cc_{id_cc}", on_click=deletar_cc, args=(id_cc,))
                 st.markdown("---")
