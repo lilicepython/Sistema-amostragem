@@ -144,20 +144,22 @@ if aba_selecionada == "Ordem de Serviço":
             with c3:
                 st.button("Excluir", key=f"del_os_{id_arq}", on_click=deletar_os, args=(id_arq,))
             st.markdown("---")
-
 # =====================================================================
 # MÓDULO 2: PLANO DE AMOSTRAGEM
 # =====================================================================
 elif aba_selecionada == "Plano de Amostragem":
     st.title("Geração de Planos de Amostragem")
     
-    num_documento = st.text_input("Numeração do Documento")
-    nome_empreendimento = st.text_input("Nome do Empreendimento")
-    endereco_empreendimento = st.text_input("Endereço do Empreendimento")
-    responsavel_empreendimento = st.text_input("Responsável")
+    with st.form("form_plano"):
+        num_documento = st.text_input("Numeração do Documento")
+        nome_empreendimento = st.text_input("Nome do Empreendimento")
+        endereco_empreendimento = st.text_input("Endereço do Empreendimento")
+        responsavel_empreendimento = st.text_input("Responsável")
+        
+        submit_plano = st.form_submit_button("Gerar Plano de Amostragem", type="primary")
     
-    if st.button("Gerar Plano de Amostragem", type="primary"):
-        if not num_documento or not nome_empreendimento:
+    if submit_plano:
+        if not num_documento.strip() or not nome_empreendimento.strip():
             st.error("Preencha ao menos a Numeração e o Empreendimento.")
         else:
             # DOCX
@@ -187,10 +189,11 @@ elif aba_selecionada == "Plano de Amostragem":
             elementos.append(tabela)
             pdf.build(elementos)
             
+            st.success("Plano de Amostragem gerado com sucesso!")
+            
             c1, c2 = st.columns(2)
             c1.download_button("Baixar Plano (PDF)", data=buf_pdf.getvalue(), file_name=f"Plano_{num_documento}.pdf", mime="application/pdf")
             c2.download_button("Baixar Plano (Word)", data=buf_docx.getvalue(), file_name=f"Plano_{num_documento}.docx")
-
 # =====================================================================
 # MÓDULO 3: CADEIA DE CUSTÓDIA
 # =====================================================================
